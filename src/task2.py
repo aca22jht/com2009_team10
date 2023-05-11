@@ -25,26 +25,31 @@ class Obstacle():
         print ('Back: {}'.format(msg.ranges[180]))
         
       
-        # Obstacle Avoidance
-        self.distance = 0.7
+    # Obstacle Avoidance
+        self.distance = 1.0
         if msg.ranges[0] > self.distance and msg.ranges[15] > self.distance and msg.ranges[345] > self.distance:
 
         # if theres no obstacle detected :
             obstacle.linear.x = 0.5 
-            obstacle.angular.z = 0.1
+            obstacle.angular.z = 0.1 
             rospy.loginfo("Exploring")
 
         # incoming obstacle :
         else: 
-            rospy.loginfo("An Obstacle Near Detected")
-            # stop
-            obstacle.linear.x = 0.0
-            # rotate counter-clockwise
-            obstacle.angular.z = 1.5
+            if msg.ranges[0] > self.distance and msg.ranges[15] > self.distance and msg.ranges[345] > self.distance:
+                rospy.loginfo("An Obstacle Near Detected")
+                # stop
+                obstacle.linear.x = 0.0
+                # rotate counter-clockwise
+                obstacle.angular.z = 0.5
+
+            else:
+                obstacle.linear.x = 0.0
+                # rotate counter-clockwise
+                obstacle.angular.z = -0.5
 
             # distance to the rightmost laser scan measurement, range value at an angle of 15 degrees, 345 degrees, 45 degrees and 315 degrees are > certain distance threshold? No obstacles
             if msg.ranges[0] > self.distance and msg.ranges[15] > self.distance and msg.ranges[345] > self.distance and msg.ranges[45] > self.distance and msg.ranges[315] > self.distance:               
-                # keep moving
                 obstacle.linear.x = 0.5 
                 obstacle.angular.z = 0.1
 
