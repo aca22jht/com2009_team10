@@ -1,4 +1,0 @@
-<launch>
-  <node pkg="com2009_team10" type="task3.py" name="task3" output="screen">
-  </node>
-</launch>
