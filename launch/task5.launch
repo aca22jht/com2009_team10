@@ -1,3 +1,9 @@
 <launch>
     <node pkg="com2009_team10" type="task5.py" name="task5" output="screen" />
+
+    <!--launching SLAM package-->
+    <include file = "$(find turtlebot3_slam)/launch/turtlebot3_slam.launch"/>
+
+    <!--Node to save the map -->
+    <node name ="map_saver" pkg="map" type="map_server" output="screen" args= "-f task4_map"/>
 </launch>
