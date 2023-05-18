@@ -1,0 +1,3 @@
+<launch>
+    <node pkg="com2009_team10" type="task5.py" name="task5" output="screen" />
+</launch>
