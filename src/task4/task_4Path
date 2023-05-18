@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+
+import rospy
+import actionlib
+import tf2_ros
+from move_base_msgs.msg import MoveBaseAction,MoveBaseGoal
+from nav_msgs.msg import Odometry
+
+
+class task4():
+
+
+    #The waypoints need to be defined before the path can be set
+    def main():
+        print("foo")
+        global pos_x, pos_y
+        print(pos_x)
+        print(pos_y)
+        if pos_x == -2.0823 and  pos_y ==  -1.9097: # This is zone A
+            way_points = [(-0.774, -0.254),(-0.717,1.092),(1.200 ,1.491),(0.916, -1.336)]
+            for waypoint in (way_points):
+                if move_to_marker(waypoint):
+                    #the move has been succesful, does not need to go on any longer
+                    break
+        elif  pos_x == -1.24044 and pos_y == 2.06729:  # This is zone B
+            way_points = [(-0.774, -0.254),(0.916, -1.336),(1.200 ,1.491),(-0.717,1.092)] 
+        elif pos_x == -2.06729 and  pos_y == 1.97396:  # This is zone C
+            way_points = [(1.200 ,1.491),(-0.717,1.092),(-0.774, -0.254),(0.916, -1.336)]
+        else:
+            rospy.loginfo("The robot is not in a start zone")
+
+        # move_to_next_marker(way_points)
+        # move_to_marker(way_points)
+
+    #the order in which the way point are aranged changes
+
+   # def zone_detector():
+        #global pos_x, pos_y
+        #print(pos_x)
+        #print(pos_y)
+       # if pos_x == -2.06729 and  pos_y ==  -1.97396: # This is zone A
+          #  return "A"
+      #  elif pos_x == -1.24044 and pos_y == 2.06729:  # This is zone B
+        #    return "B"
+       # elif pos_x == -2.06729 and  pos_y == 1.97396:  # This is zone C
+        #    return "C"
+
+
+    def goal_reached_callback(goal_status):
+        if goal_status == actionlib.GoalStatus.SUCCEEDED:
+            rospy.loginfo("Time to check the beacon!")
+            #need to add the colour detection here!
+            # if detected then cancel the path
+            return True
+        else:
+            rospy.loginfo("Goal failed! Unable to reach the way point. Cannot check the beacon")
+
+
+
+    def move_to_marker(way_points):
+        client = actionlib.SimpleActionClient("move_base", MoveBaseAction)
+        client.wait_for_server()
+
+        goal = MoveBaseGoal()
+        goal.target_pose.header.frame_id = "beaconing_map"
+        goal.target_pose.pose.position.x = way_points[index][0]
+        goal.target_pose.pose.position.y = way_points[index][1]
+        goal.target_pose.pose.orientation.w = 1.0
+
+
+        client.send_goal(goal, done_cb=goal_reached_callback)
+        client.wait_for_result()
+        return True #if successful, return true
+
+    def callback(topic_data: Odometry):
+        print("setting vars")
+        global pos_x, pos_y, startup
+        if startup:
+            pos_x = topic_data.pose.pose.position.x
+            pos_y = topic_data.pose.pose.position.y
+            startup = False
+
+
+rospy.init_node('task_4Path')
+startup = True
+pos_x = 0.0
+pos_y = 0.0
+rospy.Subscriber("odom", Odometry, task4.callback)
