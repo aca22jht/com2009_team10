@@ -6,17 +6,14 @@ from move_base_msgs.msg import MoveBaseAction,MoveBaseGoal
 from nav_msgs.msg import Odometry
 from pickle import TRUE
 import cv2
-import tf2_ros
-import geometry_msgs.msg
 from cv_bridge import CvBridge, CvBridgeError 
 
 from sensor_msgs.msg import Image 
 import numpy as np
 
 from geometry_msgs.msg import Twist
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped
 
-from tf.transformations import quaternion_from_euler
 
 
 
@@ -24,16 +21,13 @@ class PathFollow():
 
     #gets the current position of the robot 
     def callback_function(self, topic_data: Odometry):
-        if self.startup:
-            print("setting vars")
-            self.pos_x = topic_data.pose.pose.position.x
-            self.pos_y = topic_data.pose.pose.position.y
-            self.rotation_x = topic_data.pose.pose.orientation.x
-            self.rotation_y = topic_data.pose.pose.orientation.y
-            self.rotation_z = topic_data.pose.pose.orientation.z
-            self.rotation_w = topic_data.pose.pose.orientation.w
-            self.startup = False
-            self.cvbridge_interface = CvBridge() 
+        self.pos_x = topic_data.pose.pose.position.x
+        self.pos_y = topic_data.pose.pose.position.y
+        self.rotation_x = topic_data.pose.pose.orientation.x
+        self.rotation_y = topic_data.pose.pose.orientation.y
+        self.rotation_z = topic_data.pose.pose.orientation.z
+        self.rotation_w = topic_data.pose.pose.orientation.w
+
 
     def camera_cb(self, img_data): 
         try:
@@ -55,7 +49,6 @@ class PathFollow():
 
         if self.searching:
             #do the stuff to see what color the beacon is
-            rospy.loginfo(f"We are searching for a color beacon...") 
             max_count = 0
             for color, (lower, upper) in colors.items():
                 lower = np.array(lower, dtype=np.uint8)
@@ -69,6 +62,10 @@ class PathFollow():
                     max_count = count
             self.beacon_determined = beacon_color
         elif self.target_color is None:
+            if( (time.time() - self.start_time) >= 15):
+                self.found_color = True
+                self.target_color = 'turquoise'
+                self.detection_time = time.time()
             for color, (lower, upper) in colors.items():
                 lower = np.array(lower, dtype=np.uint8)
                 upper = np.array(upper, dtype=np.uint8)
@@ -90,9 +87,12 @@ class PathFollow():
         self.sub = rospy.Subscriber("odom", Odometry, self.callback_function)
         rospy.Subscriber("/camera/rgb/image_raw", Image, self.camera_cb) 
 
+        self.cvbridge_interface = CvBridge()
+
         rospy.loginfo(f"The '{self.node_name}' node is active...") 
 
         self.startup = True
+        self.moving = False
         self.pos_x = 0.0
         self.pos_y = 0.0
         self.pos_z = 0.0
@@ -101,14 +101,13 @@ class PathFollow():
         self.rotation_z = 0.0
         self.rotation_w = 0.0
 
-        print(f"Launched the '{self.node_name}' node. Currently waiting for an image...")
-        
         self. dominant_color = None
         self.target_color = None
         self.searching = False
         self.beacon_determined = None
         self.detection_time = None
         self.beacon_found = False
+        self.start_time = time.time()
 
         self.pub= rospy.Publisher("/cmd_vel", Twist, queue_size=10)
 
@@ -116,27 +115,28 @@ class PathFollow():
         self.twist.linear.x = 0
         self. twist.angular.z = 0.0
 
-        self.static_tf_broadcaster = tf2_ros.StaticTransformBroadcaster()
-        self.static_transformStamped = geometry_msgs.msg.TransformStamped()
-        self.static_transformStamped.header.stamp = rospy.Time.now()
-        self.static_transformStamped.header.frame_id = "map"
-        self.static_transformStamped.child_frame_id = "base_link"
-        self.static_transformStamped.transform.translation.x = self.pos_x
-        self.static_transformStamped.transform.translation.y = self.pos_y
-        self.static_transformStamped.transform.translation.z = self.pos_z
-        self.static_transformStamped.transform.rotation.x = self.rotation_x
-        self.static_transformStamped.transform.rotation.y = self.rotation_y
-        self.static_transformStamped.transform.rotation.z = self.rotation_z
-        self.static_transformStamped.transform.rotation.w= self.rotation_w
+        self.pose_publisher = rospy.Publisher('/initialpose', PoseWithCovarianceStamped, queue_size=10)
 
-        self.static_tf_broadcaster.sendTransform(self.static_transformStamped)
+        initial_pose = PoseWithCovarianceStamped()
+        initial_pose.header.stamp = rospy.Time.now()
 
+        while self.pos_x == 0:
+            i = 0
 
+        time.sleep(5)
+        initial_pose.header.stamp = rospy.Time.now()   
+        initial_pose.header.frame_id = "map"
+        initial_pose.pose.pose.position.x = self.pos_x
+        initial_pose.pose.pose.position.y = self.pos_y
+        initial_pose.pose.pose.orientation.x = self.rotation_x
+        initial_pose.pose.pose.orientation.y = self.rotation_y
+        initial_pose.pose.pose.orientation.z = self.rotation_z
+        initial_pose.pose.pose.orientation.w = self.rotation_w
+        self.pose_publisher.publish(initial_pose)
 
     def zone_detector(self):
         pos_x = self.pos_x
         pos_y = self.pos_y
-        rospy.loginfo(f"The starting coords are {pos_x, pos_y}")
         if (-2.154 <= pos_x <= -1.9722229257346162) and (-2.11820860299087 <= pos_y <= -1.8561134249203455): # This is zone A
             return "A"
         if (-1.2499513744568171 <= pos_x <= -1.0316773335616904) and (2.0195871206906557 <= pos_y <= 2.26014292750731):  # This is zone B
@@ -185,10 +185,9 @@ class PathFollow():
 
     def main_loop(self):
         while self.pos_x == 0.0:
-            print(self.pos_x)
             self.rate.sleep()
         
-        start_time = time.time()
+        self.start_time = time.time()
 
         while self.target_color is None:
             self.twist.angular.z = 0.1
@@ -196,15 +195,15 @@ class PathFollow():
             self.rate.sleep()
     
         stop_time = time.time()
-        rotation_needed = (stop_time - start_time)
+        rotation_needed = (stop_time - self.start_time)
         self.twist.angular.z = -0.1
         self.pub.publish(self.twist)
         time.sleep(rotation_needed)
         self.twist.angular.z = 0.0
         self.pub.publish(self.twist)
+        self.moving = True
 
         rospy.loginfo(f"SEARCH INITIATED: The target beacon colour is  {self.target_color}.")
-        rospy.loginfo(self.zone_detector())
         if self.zone_detector() == "A": # This is zone A path
             way_points = [((-0.062,-0.226), (0,0,1.644,1.0)) , 
            ( (-1.846,0.039),(0,0,-2.30,1.0)), 
@@ -241,3 +240,5 @@ if __name__ == '__main__':
         publisher_instance.main_loop() 
     except rospy.ROSInterruptException:
         pass
+
+   
