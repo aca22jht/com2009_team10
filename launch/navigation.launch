@@ -1,17 +1,12 @@
-<!-- Adapted from the Robotis "turtlebot3_navigation" package: 
-https://github.com/ROBOTIS-GIT/turtlebot3/blob/master/turtlebot3_navigation/launch/turtlebot3_navigation.launch
--->
 <launch>
-  <include file="$(find com2009_simulations)/launch/beaconing.launch" />
 
   <!-- To be modified -->
   <arg name="map_file" default=" $(find task_4)/maps/beaconing_map.yaml"/>
-  <arg name="initial_pose_x" default="-2.073"/>
-  <arg name="initial_pose_y" default="-1.953"/>
- 
+  <arg name="initial_pose_x" default="0.0"/>
+  <arg name="initial_pose_y" default="0.0"/>
 
   <!-- Other arguments -->
-  <arg name="initial_pose_a" default="1.57"/>
+  <arg name="initial_pose_a" default="0.0"/>
   <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]"/>
   <arg name="move_forward_only" default="false"/>
 
@@ -39,5 +34,9 @@ https://github.com/ROBOTIS-GIT/turtlebot3/blob/master/turtlebot3_navigation/laun
   <!-- rviz -->
   <node pkg="rviz" type="rviz" name="rviz" required="true"
     args="-d $(find turtlebot3_navigation)/rviz/turtlebot3_navigation.rviz"/>
+
+    <!-- path_follow node -->
+  <node pkg="task_4" type="path_follow.py" name="path_follow_node" output="screen"/>
+
 
 </launch>
