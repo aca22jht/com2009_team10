@@ -5,15 +5,18 @@ import time
 from move_base_msgs.msg import MoveBaseAction,MoveBaseGoal
 from nav_msgs.msg import Odometry
 from pickle import TRUE
-import rospy
-
 import cv2
+import tf2_ros
+import geometry_msgs.msg
 from cv_bridge import CvBridge, CvBridgeError 
 
 from sensor_msgs.msg import Image 
 import numpy as np
 
 from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TransformStamped
+
+from tf.transformations import quaternion_from_euler
 
 
 
@@ -25,6 +28,10 @@ class PathFollow():
             print("setting vars")
             self.pos_x = topic_data.pose.pose.position.x
             self.pos_y = topic_data.pose.pose.position.y
+            self.rotation_x = topic_data.pose.pose.orientation.x
+            self.rotation_y = topic_data.pose.pose.orientation.y
+            self.rotation_z = topic_data.pose.pose.orientation.z
+            self.rotation_w = topic_data.pose.pose.orientation.w
             self.startup = False
             self.cvbridge_interface = CvBridge() 
 
@@ -60,9 +67,8 @@ class PathFollow():
                 if count > max_count:
                     beacon_color = color
                     max_count = count
-            rospy.loginfo(f"Detected beacon is {beacon_color}")
             self.beacon_determined = beacon_color
-        elif not self.found_color:
+        elif self.target_color is None:
             for color, (lower, upper) in colors.items():
                 lower = np.array(lower, dtype=np.uint8)
                 upper = np.array(upper, dtype=np.uint8)
@@ -71,9 +77,9 @@ class PathFollow():
                 total_pixel_count = hsv_img.shape[0] * hsv_img.shape[1]
                 #if the amount of a color of pixel is dominant in the image, it is in that zone
                 if count > total_pixel_count/2:
-                    print(f"The dominant color in the initial zone is {self.dominant_color}")
                     self.found_color = True
-                    self.dominant_color = color
+                    self.target_color = color
+                    self.detection_time = time.time()
                 
 
     def __init__(self): 
@@ -89,13 +95,20 @@ class PathFollow():
         self.startup = True
         self.pos_x = 0.0
         self.pos_y = 0.0
+        self.pos_z = 0.0
+        self.rotation_x = 0.0
+        self.rotation_y = 0.0
+        self.rotation_z = 0.0
+        self.rotation_w = 0.0
 
         print(f"Launched the '{self.node_name}' node. Currently waiting for an image...")
         
         self. dominant_color = None
-        self.found_color = False
+        self.target_color = None
         self.searching = False
         self.beacon_determined = None
+        self.detection_time = None
+        self.beacon_found = False
 
         self.pub= rospy.Publisher("/cmd_vel", Twist, queue_size=10)
 
@@ -103,41 +116,58 @@ class PathFollow():
         self.twist.linear.x = 0
         self. twist.angular.z = 0.0
 
+        self.static_tf_broadcaster = tf2_ros.StaticTransformBroadcaster()
+        self.static_transformStamped = geometry_msgs.msg.TransformStamped()
+        self.static_transformStamped.header.stamp = rospy.Time.now()
+        self.static_transformStamped.header.frame_id = "map"
+        self.static_transformStamped.child_frame_id = "base_link"
+        self.static_transformStamped.transform.translation.x = self.pos_x
+        self.static_transformStamped.transform.translation.y = self.pos_y
+        self.static_transformStamped.transform.translation.z = self.pos_z
+        self.static_transformStamped.transform.rotation.x = self.rotation_x
+        self.static_transformStamped.transform.rotation.y = self.rotation_y
+        self.static_transformStamped.transform.rotation.z = self.rotation_z
+        self.static_transformStamped.transform.rotation.w= self.rotation_w
+
+        self.static_tf_broadcaster.sendTransform(self.static_transformStamped)
+
+
+
     def zone_detector(self):
         pos_x = self.pos_x
         pos_y = self.pos_y
+        rospy.loginfo(f"The starting coords are {pos_x, pos_y}")
         if (-2.154 <= pos_x <= -1.9722229257346162) and (-2.11820860299087 <= pos_y <= -1.8561134249203455): # This is zone A
             return "A"
         if (-1.2499513744568171 <= pos_x <= -1.0316773335616904) and (2.0195871206906557 <= pos_y <= 2.26014292750731):  # This is zone B
             return "B"
-        if (2.006087983504334 <= pos_x <= 2.15057375772878) and (2.008324823620115 <= pos_y <= 2.26931502846564):  # This is zone C
-            print("is in zone c")
+        if (2.006087983504334 <= pos_x <= 2.15057375772878) and (1.87 <= pos_y <= 2.2):  # This is zone C
             return "C"
 
     def check_beacon(self):
         while self.beacon_determined == None:
             self.searching = True
-        print("beacon determined")
+        if self.beacon_determined == self.target_color:
+            #great success
+            rospy.loginfo(f"TARGET DETECTED: Beaconing initiated.")
+            rospy.loginfo(f"BEACONING COMPLETE: The robot has now stopped.")
+            self.beacon_found = True
+        else:
+             rospy.loginfo(f"Beacon color detected {self.beacon_determined} does not match target color {self.target_color}")
         self.beacon_determined = None
         self.searching = False
 
     def goal_reached_callback(self, state, result ):
-        rospy.loginfo("goal completed with state: %s", result)
         #check beacon
         self.check_beacon()
         
 
     def move_to_marker(self, waypoint):
-        rospy.loginfo("moving to marker")
         client = actionlib.SimpleActionClient("move_base", MoveBaseAction)
-
-        rospy.loginfo("Waiting for server...")
+        rospy.loginfo("Moving to next beacon.")
         client.wait_for_server()  # Wait for the server to start
-
-        rospy.loginfo("Creating goal")
         goal = MoveBaseGoal()
         goal.target_pose.header.frame_id = "map"
-        rospy.loginfo("Waypoint coordinates: %s, %s", waypoint[0], waypoint[1])
         goal.target_pose.pose.position.x = waypoint[0][0]
         goal.target_pose.pose.position.y = waypoint[0][1]
         goal.target_pose.pose.orientation.x = 0.0
@@ -145,14 +175,11 @@ class PathFollow():
         goal.target_pose.pose.orientation.z = waypoint[1][2]
         goal.target_pose.pose.orientation.w = 1.0
 
-        rospy.loginfo("Sending goal")
         client.send_goal(goal, done_cb=self.goal_reached_callback)
         if client.wait_for_result(rospy.Duration.from_sec(30.0)):
-            rospy.loginfo("Result received!")
             rospy.loginfo("Pausing to check beacon")
             #here, spin to check beacon
             self.check_beacon()
-            print("beacon has been checked")
         else:
             rospy.logerr("No result received from move_base")
 
@@ -161,29 +188,50 @@ class PathFollow():
             print(self.pos_x)
             self.rate.sleep()
         
-        while not self.found_color:
+        start_time = time.time()
+
+        while self.target_color is None:
             self.twist.angular.z = 0.1
             self.pub.publish(self.twist)
             self.rate.sleep()
-
-        self.twist.angular.z = 0
+    
+        stop_time = time.time()
+        rotation_needed = (stop_time - start_time)
+        self.twist.angular.z = -0.1
+        self.pub.publish(self.twist)
+        time.sleep(rotation_needed)
+        self.twist.angular.z = 0.0
         self.pub.publish(self.twist)
 
+        rospy.loginfo(f"SEARCH INITIATED: The target beacon colour is  {self.target_color}.")
+        rospy.loginfo(self.zone_detector())
         if self.zone_detector() == "A": # This is zone A path
-            print("cooking in here")
             way_points = [((-0.062,-0.226), (0,0,1.644,1.0)) , 
            ( (-1.846,0.039),(0,0,-2.30,1.0)), 
             ((-0.7030,1.415),(0,0,1.02,1.0)),
             ((0.962,1.099), (0,0,-2.20,1.0)),
             ((1.835,-1.242),(0,0, -1.60 ,1.0))]
-            for waypoint in (way_points):
-                self.move_to_marker(waypoint)
-        elif  self.pos_x == -1.24044 and self.pos_y == 2.06729:  # This is zone B path
-            way_points = [(-0.774, -0.254),(0.916, -1.336),(1.200 ,1.491),(-0.717,1.092)] 
-        elif self.pos_x == -2.06729 and  self.pos_y == 1.97396:  # This is zone C path
-            way_points = [(1.200 ,1.491),(-0.717,1.092),(-0.774, -0.254),(0.916, -1.336)]
+        elif self.zone_detector() == "B":  # This is zone B path
+            way_points = [( (-1.846,0.039),(0,0,-2.30,1.0)),
+            ((-0.062,-0.226), (0,0,1.644,1.0)), 
+            ((1.835,-1.242),(0,0, -1.60 ,1.0)),
+            ((0.962,1.099), (0,0,-2.20,1.0)),
+            ( (-1.846,0.039),(0,0,-2.30,1.0))
+            ]
+        elif self.zone_detector() == "C":  # This is zone C path
+            way_points = [((0.962,1.099), (0,0,-2.20,1.0)),
+            ((-0.7030,1.415),(0,0,1.02,1.0)),
+            ( (-1.846,0.039),(0,0,-2.30,1.0)),
+            ((-0.062,-0.226), (0,0,1.644,1.0)),
+            ((1.835,-1.242),(0,0, -1.60 ,1.0))
+            ]
         else:
             rospy.loginfo("The robot is not in a start zone")
+
+        for waypoint in (way_points):
+            if self.beacon_found:
+                return
+            self.move_to_marker(waypoint)
 
     
 
