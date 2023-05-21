@@ -45,7 +45,7 @@ class Obstacle():
 
             else:
                 obstacle.linear.x = 0.0
-                # rotate counter-clockwise
+                # rotate clockwise
                 obstacle.angular.z = -0.5
 
             # distance to the rightmost laser scan measurement, range value at an angle of 15 degrees, 345 degrees, 45 degrees and 315 degrees are > certain distance threshold? No obstacles
